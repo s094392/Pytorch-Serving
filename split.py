@@ -29,16 +29,26 @@ def move_layer(layer, device):
         
     layer.forward = moved_forward
 
+def run_split(net, move=True, batch_size=4, do_profile=True):
+    device_count = torch.cuda.device_count()
+
+    if move:
+        layers = get_children(net)
+        for i in range(len(layers)):
+            move_layer(layers[i], i%device_count)
+    else:
+        net.to(0)
+
+    if do_profile:
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            with record_function("model_inference"):
+                inputs = torch.randn(batch_size, 3, 224, 224).to(0)
+                net(inputs)
+        print(prof.key_averages().table(sort_by="cuda_time_total"))
+    else:
+        inputs = torch.randn(batch_size, 3, 224, 224).to(0)
+        net(inputs)
+
 if __name__ == "__main__":
     net = alexnet()
-    layers = get_children(net)
-    for i in range(len(layers)):
-        move_layer(layers[i], f"cuda:{i%1}")
-        
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-        with record_function("model_inference"):
-            batch_size = 4
-            inputs = torch.randn(batch_size, 3, 224, 224)
-            net(inputs)
-
-    print(prof.key_averages().table(sort_by="cuda_time_total"))
+    run_split(net, False, 4, True)
