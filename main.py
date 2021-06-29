@@ -10,8 +10,8 @@ def worker(worker_id):
         pool[worker_id].task_done()
 
 def main():
-    N = 3
-    for i in range(N):
+    number_of_worker = 3
+    for i in range(number_of_worker):
         pool[i] = queue.Queue()
         threading.Thread(target=worker,args=(i,), daemon=True).start()
 
@@ -21,5 +21,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
