@@ -24,28 +24,33 @@ def get_children(model: torch.nn.Module):
 
 
 # move a layer to specific gpu by replacing the forward function
-def move_layer(layer, device, mutex):
+def move_layer(layer, device, job_mutex, scheduler_mutex, i):
     layer.to(device)
     original_forward = layer.forward
 
     def moved_forward(x):
-        if mutex.acquire():
-            x = x.to(device).float()
+        print("ready")
+        if job_mutex.acquire():
+            scheduler_mutex.release()
+            x = x.to(device)
             out = original_forward(x)
-            mutex.release()
+            job_mutex.release()
+            scheduler_mutex.acquire()
+            print("forward")
             return out
 
     layer.forward = moved_forward
 
 
 # split the model into layers and move them to different gpu
-def run_split(net, mutex, move=True, batch_size=4, do_profile=True):
+def run_split(net, job_mutex, scheduler_mutex, move=True, batch_size=4, do_profile=True):
     device_count = torch.cuda.device_count()
+    scheduler_mutex.acquire()
 
     if move:
         layers = get_children(net)
         for i, layer in enumerate(layers):
-            move_layer(layer, i % device_count, mutex)
+            move_layer(layer, i % device_count, job_mutex, scheduler_mutex, i)
     else:
         net.to(0)
 
@@ -62,6 +67,15 @@ def run_split(net, mutex, move=True, batch_size=4, do_profile=True):
 
 
 if __name__ == "__main__":
-    net = vgg16()
-    mutex = threading.Lock()
-    run_split(net, mutex, True, 1, True)
+    net = alexnet()
+    job_mutex = threading.Lock()
+    scheduler_mutex = threading.Lock()
+    job_mutex.acquire()
+    done = False
+    threading.Thread(target=run_split,args=(net, job_mutex, scheduler_mutex, True, 1, True), daemon=True).start()
+    while:
+        a = input()
+        job_mutex.release()
+        if scheduler_mutex.acquire():
+            job_mutex.acquire()
+            scheduler_mutex.release()
