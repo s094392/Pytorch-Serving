@@ -4,6 +4,11 @@ import copy
 from torchvision.models import resnet18, vgg16, alexnet
 from torch.profiler import profile, record_function, ProfilerActivity
 
+result = [
+    False,
+]
+next_device = 0
+
 
 # return a list of layers
 def get_children(model: torch.nn.Module):
@@ -25,25 +30,30 @@ def get_children(model: torch.nn.Module):
 
 # move a layer to specific gpu by replacing the forward function
 def move_layer(layer, device, job_mutex, scheduler_mutex, i):
-    layer.to(device)
     original_forward = layer.forward
 
     def moved_forward(x):
         print("ready")
         if job_mutex.acquire():
             scheduler_mutex.release()
-            x = x.to(device)
+            x = x.to(next_device)
+            layer.to(next_device)
             out = original_forward(x)
             job_mutex.release()
             scheduler_mutex.acquire()
-            print("forward")
+            print(f"forwarded on {next_device}")
             return out
 
     layer.forward = moved_forward
 
 
 # split the model into layers and move them to different gpu
-def run_split(net, job_mutex, scheduler_mutex, move=True, batch_size=4, do_profile=True):
+def run_split(net,
+              job_mutex,
+              scheduler_mutex,
+              move=True,
+              batch_size=4,
+              do_profile=True):
     device_count = torch.cuda.device_count()
     scheduler_mutex.acquire()
 
@@ -64,6 +74,8 @@ def run_split(net, job_mutex, scheduler_mutex, move=True, batch_size=4, do_profi
     else:
         inputs = torch.randn(batch_size, 3, 224, 224).to(0)
         net(inputs)
+    result[0] = True
+    scheduler_mutex.release()
 
 
 if __name__ == "__main__":
@@ -72,10 +84,15 @@ if __name__ == "__main__":
     scheduler_mutex = threading.Lock()
     job_mutex.acquire()
     done = False
-    threading.Thread(target=run_split,args=(net, job_mutex, scheduler_mutex, True, 1, True), daemon=True).start()
-    while:
-        a = input()
+    threading.Thread(target=run_split,
+                     args=(net, job_mutex, scheduler_mutex, True, 1, True),
+                     daemon=True).start()
+    while True:
+        # next_device = int(input())
+        next_device = 1
         job_mutex.release()
         if scheduler_mutex.acquire():
             job_mutex.acquire()
+            if result[0]:
+                break
             scheduler_mutex.release()
