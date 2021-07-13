@@ -7,6 +7,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 result = [
     False,
 ]
+
 next_device = 0
 
 
